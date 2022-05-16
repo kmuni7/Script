@@ -1,0 +1,87 @@
+pipeline {
+    agent any 
+    
+     environment {
+
+      sonar_url = 'http://172.31.27.241:9000/'
+      sonar_username = 'admin'
+      sonar_password = 'admin'
+      nexus_url = '54.224.130.243:8081'
+      artifact_version = '4.0.0'
+
+ }
+    tools{
+        jdk 'Java'
+        maven 'maven3.3.9'
+    }
+    stages {
+        
+        stage('Git') {
+            steps {
+                step([$class: 'WsCleanup'])
+            
+            }
+        }
+        stage("Checkout") {
+    
+            steps {
+                    checkout([$class: 'GitSCM',
+                        branches: [
+                            [name: 'main']
+                        ],
+                        doGenerateSubmoduleConfigurations: false,
+                        extensions: [[$class: 'LocalBranch', localBranch: "**"]],
+                        submoduleCfg: [],
+                        userRemoteConfigs: [
+                            [credentialsId: 'repo.notification-sender', url: 'https://github.com/kmuni7/game-of-life.git']
+                        ]
+                    ])
+                }
+            }
+            
+          stage('maven build') {
+            steps {
+                sh  'mvn clean install'
+
+            }
+        }
+       
+       stage ('Sonarqube Analysis'){
+           steps {
+           withSonarQubeEnv('sonarqube') {
+           sh '''
+           mvn -e -B sonar:sonar -Dsonar.java.source=1.8 -Dsonar.host.url="${sonar_url}" -Dsonar.login="${sonar_username}" -Dsonar.password="${sonar_password}" -Dsonar.sourceEncoding=UTF-8
+           '''
+           }
+         }
+      }
+    stage ('Publish Artifact') {
+        steps {
+          nexusArtifactUploader artifacts: [[artifactId: 'gameoflife', classifier: '', file: "/var/lib/jenkins/workspace/pipeline-game-of-life/gameoflife-build/target/gameoflife-build-1.0-SNAPSHOT.jar", type: 'jar']], credentialsId: '78d15135-fa66-4e69-b0bd-a43888562826', groupId: 'com.wakaleo.gameoflife', nexusUrl: "${nexus_url}", nexusVersion: 'nexus3', protocol: 'http', repository: 'release1', version: "${artifact_version}"
+         archiveArtifacts '**/*.jar'
+        }
+      }
+    
+	stage('Building image') {
+       steps{
+         script {
+           dockerImage = docker.build "7843km/gamerep:games"
+           }
+          }
+	    }
+ 
+
+  stage('Docker publish') {
+    steps {
+    script {
+        withDockerRegistry(registry:[ credentialsId: 'dockercred']) {
+         sh 'docker push 7843km/gamerep:games'
+         }
+        }
+      }
+     }
+   }
+}
+
+
+
